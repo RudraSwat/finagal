@@ -1,0 +1,19 @@
+(inc "lib/operators.fin")
+
+(setq >= .(or (> (@args 0) (@args 1)) (= (@args 0) (@args 1))))
+(setq < .(not (>= (@args 0) (@args 1))))
+(setq <= .(not (> (@args 0) (@args 1))))
+
+(setq fib .(
+    (ifel (= (@args 0) 0) (
+        ret 0
+    ) ())
+    (ifel (= (@args 0) 1) (
+        ret 1
+    ) ())
+    (ret (+ (fib (- (@args 0) 1)) (fib (- (@args 0) 2))))
+))
+
+(println (fib 20))
+
+(println (runtime_ctx))
