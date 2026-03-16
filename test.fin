@@ -1,8 +1,7 @@
 (inc "lib/operators.fin")
 
-(setq >= .(or (> (@args 0) (@args 1)) (= (@args 0) (@args 1))))
-(setq < .(not (>= (@args 0) (@args 1))))
-(setq <= .(not (> (@args 0) (@args 1))))
+(ffi-load "libmath.so")
+(ffi func_name (int32 int32) -> return_type)
 
 (setq fib .(
     (ifel (= (@args 0) 0) (
