@@ -1,7 +1,7 @@
 use std::io::{self, Write, IsTerminal, BufRead};
 use std::env;
 use std::{collections::HashMap, fs};
-use std::ffi::{CString, c_char, CStr};
+use std::ffi::{CString, c_char, c_void, CStr};
 use libffi::low::{ffi_type, ffi_cif, prep_cif};
 use libffi::raw::{ffi_type_sint64, ffi_type_float, ffi_type_double, ffi_type_pointer, ffi_abi_FFI_DEFAULT_ABI, ffi_call};
 
@@ -107,6 +107,7 @@ unsafe fn call_ffi_function(func_ptr: unsafe extern "C" fn(), ctypes: &[CType], 
     let mut int_storage: Vec<i64> = Vec::new();
     let mut float_storage: Vec<f64> = Vec::new();
     let mut string_storage: Vec<CString> = Vec::new();
+    let mut string_ptrs: Vec<*const c_char> = Vec::new();
     let mut arg_types: Vec<*mut ffi_type> = Vec::with_capacity(values.len());
     let mut arg_values: Vec<*mut ::std::os::raw::c_void> = Vec::with_capacity(values.len());
 
@@ -115,24 +116,26 @@ unsafe fn call_ffi_function(func_ptr: unsafe extern "C" fn(), ctypes: &[CType], 
             match (val, ctype) {
                 (Value::Int(i), CType::Int) => {
                     int_storage.push(*i);
-                    arg_types.push(&mut ffi_type_sint64 as *mut _);
+                    arg_types.push(&mut ffi_type_sint64);
                     arg_values.push(int_storage.last_mut().unwrap() as *mut _ as *mut _);
                 }
                 (Value::Float(f), CType::Float) => {
-                    float_storage.push(*f as f32 as f64);
-                    arg_types.push(&mut ffi_type_float as *mut _);
+                    float_storage.push(*f as f64);
+                    arg_types.push(&mut ffi_type_float);
                     arg_values.push(float_storage.last_mut().unwrap() as *mut _ as *mut _);
                 }
                 (Value::Float(f), CType::Double) => {
                     float_storage.push(*f);
-                    arg_types.push(&mut ffi_type_double as *mut _);
+                    arg_types.push(&mut ffi_type_double);
                     arg_values.push(float_storage.last_mut().unwrap() as *mut _ as *mut _);
                 }
                 (Value::Str(s), CType::Str) => {
                     let cstr = CString::new(s.as_str()).unwrap();
-                    arg_types.push(&mut ffi_type_pointer as *mut _);
-                    arg_values.push(cstr.as_ptr() as *mut _);
                     string_storage.push(cstr);
+                    let ptr = string_storage.last().unwrap().as_ptr();
+                    string_ptrs.push(ptr);
+                    arg_types.push(&mut ffi_type_pointer);
+                    arg_values.push(string_ptrs.last_mut().unwrap() as *mut _ as *mut c_void);
                 }
                 _ => panic!("unsupported type conversion: {:?} -> {:?}", val, ctype),
             }
@@ -143,7 +146,7 @@ unsafe fn call_ffi_function(func_ptr: unsafe extern "C" fn(), ctypes: &[CType], 
             CType::Float => &mut ffi_type_float as *mut _,
             CType::Double => &mut ffi_type_double as *mut _,
             CType::Str => &mut ffi_type_pointer as *mut _,
-            _ => panic!("unsupported type")
+            _ => panic!("unsupported return type")
         };
 
         let mut cif: ffi_cif = std::mem::zeroed();
@@ -181,174 +184,6 @@ unsafe fn call_ffi_function(func_ptr: unsafe extern "C" fn(), ctypes: &[CType], 
         }
     }
 }
-
-// #[derive(Debug, Clone, PartialEq)]
-// enum CValue {
-//     Char(ffi::c_char),
-//     Double(ffi::c_double),
-//     Float(ffi::c_float),
-//     Int(ffi::c_int),
-//     Long(ffi::c_long),
-//     LongLong(ffi::c_longlong),
-//     SChar(ffi::c_schar),
-//     Short(ffi::c_short),
-//     UChar(ffi::c_uchar),
-//     UInt(ffi::c_uint),
-//     ULong(ffi::c_ulong),
-//     ULongLong(ffi::c_ulonglong),
-//     UShort(ffi::c_ushort),
-//     Str(ffi::CString),
-// }
-
-// impl CValue {
-//     fn get_ctype(&self) -> &str {
-//         match self {
-//             CValue::Char(_) => "Char",
-//             CValue::Double(_) => "Double",
-//             CValue::Float(_) => "Float",
-//             CValue::Int(_) => "Int",
-//             CValue::Long(_) => "Long",
-//             CValue::LongLong(_) => "LongLong",
-//             CValue::SChar(_) => "SChar",
-//             CValue::Short(_) => "Short",
-//             CValue::UChar(_) => "UChar",
-//             CValue::UInt(_) => "UInt",
-//             CValue::ULong(_) => "ULong",
-//             CValue::ULongLong(_) => "ULongLong",
-//             CValue::UShort(_) => "UShort",
-//             CValue::Str(_) => "Str",
-//         }
-//     }
-// }
-
-// impl From<CValue> for Value {
-//     fn from(cvalue: CValue) -> Self {
-//         match cvalue {
-//             CValue::Char(c) => Value::Int(c as i64),
-//             CValue::Double(d) => Value::Float(d as f64),
-//             CValue::Float(f) => Value::Float(f as f64),
-//             CValue::Int(i) => Value::Int(i as i64),
-//             CValue::Long(l) => Value::Int(l as i64),
-//             CValue::LongLong(ll) => Value::Int(ll as i64),
-//             CValue::SChar(sc) => Value::Int(sc as i64),
-//             CValue::Short(s) => Value::Int(s as i64),
-//             CValue::UChar(uc) => Value::Int(uc as i64),
-//             CValue::UInt(ui) => Value::Int(ui as i64),
-//             CValue::ULong(ul) => Value::Int(ul as i64),
-//             CValue::ULongLong(ull) => Value::Int(ull as i64),
-//             CValue::UShort(us) => Value::Int(us as i64),
-//             CValue::Str(s) => {
-//                 match s.to_str() {
-//                     Ok(s_str) => Value::Str(s_str.to_string()),
-//                     Err(_) => panic!("invalid UTF-8 data in CString"),
-//                 }
-//             },
-//         }
-//     }
-// }
-
-// fn get_cvalue_from(ctype_name: &str) -> CValue {
-//     match ctype_name {
-//         "Char" => CValue::Char(0),
-//         "Double" => CValue::Double(0.0),
-//         "Float" => CValue::Float(0.0),
-//         "Int" => CValue::Int(0),
-//         "Long" => CValue::Long(0),
-//         "LongLong" => CValue::LongLong(0),
-//         "SChar" => CValue::SChar(0),
-//         "Short" => CValue::Short(0),
-//         "UChar" => CValue::UChar(0),
-//         "UInt" => CValue::UInt(0),
-//         "ULong" => CValue::ULong(0),
-//         "ULongLong" => CValue::ULongLong(0),
-//         "UShort" => CValue::UShort(0),
-//         "Str" => CValue::Str(std::ffi::CString::new("").unwrap()),
-//         _ => panic!("unknown ctype name: {}", ctype_name),
-//     }
-// }
-
-// fn is_same_ctype(c1: &CValue, c2: &CValue) -> bool {
-//     match (c1, c2) {
-//         (CValue::Char(_), CValue::Char(_)) => true,
-//         (CValue::Double(_), CValue::Double(_)) => true,
-//         (CValue::Float(_), CValue::Float(_)) => true,
-//         (CValue::Int(_), CValue::Int(_)) => true,
-//         (CValue::Long(_), CValue::Long(_)) => true,
-//         (CValue::LongLong(_), CValue::LongLong(_)) => true,
-//         (CValue::SChar(_), CValue::SChar(_)) => true,
-//         (CValue::Short(_), CValue::Short(_)) => true,
-//         (CValue::UChar(_), CValue::UChar(_)) => true,
-//         (CValue::UInt(_), CValue::UInt(_)) => true,
-//         (CValue::ULong(_), CValue::ULong(_)) => true,
-//         (CValue::ULongLong(_), CValue::ULongLong(_)) => true,
-//         (CValue::UShort(_), CValue::UShort(_)) => true,
-//         (CValue::Str(_), CValue::Str(_)) => true,
-//         _ => false,
-//     }
-// }
-
-// fn convert_to_ctype_by_name(value: Value, ctype_name: &str) -> CValue {
-//     match ctype_name {
-//         "Char" => match value {
-//             Value::Int(i) => CValue::Char(i as i8),
-//             Value::Str(s) => CValue::Char(ffi::CString::new(s).unwrap().as_bytes_with_nul()[0] as i8),
-//             _ => panic!("cannot convert to Char"),
-//         },
-//         "Double" => match value {
-//             Value::Float(f) => CValue::Double(f as ffi::c_double),
-//             _ => panic!("cannot convert to Double"),
-//         },
-//         "Float" => match value {
-//             Value::Float(f) => CValue::Float(f as ffi::c_float),
-//             _ => panic!("cannot convert this value to Float"),
-//         },
-//         "Int" => match value {
-//             Value::Int(i) => CValue::Int(i as ffi::c_int),
-//             _ => panic!("cannot convert this value to Int"),
-//         },
-//         "Long" => match value {
-//             Value::Int(i) => CValue::Long(i as ffi::c_long),
-//             _ => panic!("cannot convert this value to Long"),
-//         },
-//         "LongLong" => match value {
-//             Value::Int(i) => CValue::LongLong(i as ffi::c_longlong),
-//             _ => panic!("cannot convert this value to LongLong"),
-//         },
-//         "SChar" => match value {
-//             Value::Int(i) => CValue::SChar(i as ffi::c_schar),
-//             _ => panic!("cannot convert this value to SChar"),
-//         },
-//         "Short" => match value {
-//             Value::Int(i) => CValue::Short(i as ffi::c_short),
-//             _ => panic!("cannot convert this value to Short"),
-//         },
-//         "UChar" => match value {
-//             Value::Int(i) => CValue::UChar(i as ffi::c_uchar),
-//             _ => panic!("cannot convert this value to UChar"),
-//         },
-//         "UInt" => match value {
-//             Value::Int(i) => CValue::UInt(i as ffi::c_uint),
-//             _ => panic!("cannot convert this value to UInt"),
-//         },
-//         "ULong" => match value {
-//             Value::Int(i) => CValue::ULong(i as ffi::c_ulong),
-//             _ => panic!("cannot convert this value to ULong"),
-//         },
-//         "ULongLong" => match value {
-//             Value::Int(i) => CValue::ULongLong(i as ffi::c_ulonglong),
-//             _ => panic!("cannot convert this value to ULongLong"),
-//         },
-//         "UShort" => match value {
-//             Value::Int(i) => CValue::UShort(i as ffi::c_ushort),
-//             _ => panic!("cannot convert this value to UShort"),
-//         },
-//         "Str" => match value {
-//             Value::Str(s) => CValue::Str(std::ffi::CString::new(s).unwrap()),
-//             _ => panic!("cannot convert this value to Str"),
-//         },
-//         _ => panic!("unknown C type: {}", ctype_name),
-//     }
-// }
 
 struct Context {
     scopes: Vec<HashMap<String, Value>>,
