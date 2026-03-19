@@ -14,6 +14,7 @@ pub enum Value {
     Eval(Vec<Value>),
     FFI(String, String, Vec<CType>, CType),
     Lambda(Vec<Value>),
+    Dict(HashMap<String, Value>),
     Builtin(fn(Vec<Value>, &mut Context, &RuntimeContext) -> Value),
     Ret(Box<Value>),
 }

@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, collections::HashMap};
 use crate::{Value, Context, RuntimeContext, eval, eval_str, handle_operands, ffi::string_to_ctype};
 
 pub fn builtin_add(args: Vec<Value>, ctx: &mut Context, runtime_ctx: &RuntimeContext) -> Value {
@@ -47,14 +47,15 @@ pub fn builtin_peek(args: Vec<Value>, ctx: &mut Context, runtime_ctx: &RuntimeCo
 
     match (&vals[0], &vals[1]) {
         (Value::List(a), Value::Int(b)) => a[*b as usize].clone(),
-        (Value::Str(a), Value::Int(b)) => Value::Str(String::from(a.chars().nth(*b as usize).unwrap_or_default())),
+        (Value::Str(a), Value::Int(b)) => Value::Str(String::from(a.chars().nth(*b as usize).unwrap())),
+        (Value::Dict(a), Value::Str(b)) => a.get(b).unwrap().clone(),
         _ => panic!("type error"),
     }
 }
 
 pub fn builtin_eq(args: Vec<Value>, ctx: &mut Context, runtime_ctx: &RuntimeContext) -> Value {
     let vals = handle_operands(args, ctx, runtime_ctx);
-    Value::Bool(&vals[0] == &vals[1])
+    Value::Bool(vals[0] == vals[1])
 }
 
 pub fn builtin_gt(args: Vec<Value>, ctx: &mut Context, runtime_ctx: &RuntimeContext) -> Value {
@@ -90,6 +91,24 @@ pub fn builtin_len(args: Vec<Value>, ctx: &mut Context, runtime_ctx: &RuntimeCon
     }
 }
 
+pub fn builtin_dict(args: Vec<Value>, ctx: &mut Context, runtime_ctx: &RuntimeContext) -> Value {
+    let vals = handle_operands(args, ctx, runtime_ctx);
+    let mut output_dict = HashMap::new();
+    let mut key_name = String::from("");
+    for (i, x) in vals.iter().enumerate() {
+    	if i % 2 == 0 {
+    		let Value::Str(inner_key_name) = x else {
+    			panic!("expected Value::Str as key name");
+    		};
+    		key_name = inner_key_name.clone();
+		} else {
+			output_dict.insert(key_name.clone(), x.clone());
+		}
+    }
+
+    Value::Dict(output_dict)
+}
+
 pub fn builtin_fmt(args: Vec<Value>, ctx: &mut Context, runtime_ctx: &RuntimeContext) -> Value {
     let mut output_str: String = "".into();
 
@@ -110,15 +129,31 @@ pub fn builtin_fmt(args: Vec<Value>, ctx: &mut Context, runtime_ctx: &RuntimeCon
                              .join(" ");
                 output_str.push_str(&format!("({})", inner));
             },
-            Value::Lambda(_) => output_str.push_str("<lambda>"),
-            Value::Builtin(_) => output_str.push_str("<builtin>"),
-            Value::FFI(_, _, _, _) => output_str.push_str("<ffi>"),
+            Value::Dict(s) => {
+                for (i, (k, v)) in s.into_iter().enumerate() {
+                    output_str.push_str(&k);
+                    output_str.push_str(": ");
+
+                    let Value::Str(s) = builtin_fmt(Vec::from([v]), ctx, runtime_ctx) else {
+                        panic!("expected Value::Str from fmt");
+                    };
+
+					output_str.push_str(&s);
+
+					if i + 1 < s.len() {
+						output_str.push_str(", ");
+					}
+                }
+            },
+            Value::Lambda(_) => output_str.push_str("<Lambda>"),
+            Value::Builtin(_) => output_str.push_str("<Builtin>"),
+            Value::FFI(_, _, _, _) => output_str.push_str("<FFI>"),
             Value::Ret(v) => {
                 let Value::Str(s) = builtin_fmt(vec![*v], ctx, runtime_ctx) else {
                     panic!("expected Value::Str from fmt");
                 };
                 output_str.push_str(&s);
-            },
+            }
         }
     }
     Value::Str(output_str)
@@ -177,7 +212,7 @@ pub fn builtin_inc(args: Vec<Value>, ctx: &mut Context, runtime_ctx: &RuntimeCon
 
     match filename {
         Value::Str(s) => eval_str(&fs::read_to_string(&s).unwrap_or_else(|_| panic!("failed to read include file: {}", &s)), ctx, &RuntimeContext { in_repl: runtime_ctx.in_repl, in_include: true, argv: runtime_ctx.argv.clone() }),
-        _ => panic!("include file name must be a string"),
+        _ => panic!("include file name must be a String"),
     }
 }
 
@@ -189,7 +224,7 @@ pub fn builtin_ffi(args: Vec<Value>, _ctx: &mut Context, _runtime_ctx: &RuntimeC
             if let Value::Str(file_name) = &args[0] {
                 if let Value::Str(fn_name) = &args[1] {
                     if let Value::Atom(ret_type) = &args[3] {
-                        return Value::FFI(file_name.into(), fn_name.into(), fn_type_list, string_to_ctype(ret_type));
+                        Value::FFI(file_name.into(), fn_name.into(), fn_type_list, string_to_ctype(ret_type))
                     } else {
                         panic!("ffi needs return type");
                     }
@@ -206,7 +241,8 @@ pub fn builtin_ffi(args: Vec<Value>, _ctx: &mut Context, _runtime_ctx: &RuntimeC
 
 pub fn builtin_runtime_ctx(_: Vec<Value>, _: &mut Context, runtime_ctx: &RuntimeContext) -> Value {
     // FIXME: return as struct
-    Value::List(vec![Value::Bool(runtime_ctx.in_repl), Value::Bool(runtime_ctx.in_include), Value::List(runtime_ctx.argv.clone().into_iter().map(|v| Value::Str(v)).collect())])
+    // Value::List(vec![Value::Bool(runtime_ctx.in_repl), Value::Bool(runtime_ctx.in_include), Value::List(runtime_ctx.argv.clone().into_iter().map(|v| Value::Str(v)).collect())])
+    Value::Dict(HashMap::from([(String::from("in_repl"), Value::Bool(runtime_ctx.in_repl)), (String::from("in_include"), Value::Bool(runtime_ctx.in_include)), (String::from("argv"), Value::List(runtime_ctx.argv.clone().into_iter().map(|v| Value::Str(v)).collect()))]))
 }
 
 pub fn install_builtins(ctx: &mut Context) {
@@ -220,6 +256,7 @@ pub fn install_builtins(ctx: &mut Context) {
     ctx.set("and".into(), Value::Builtin(builtin_and));
     ctx.set("or".into(), Value::Builtin(builtin_or));
     ctx.set("not".into(), Value::Builtin(builtin_not));
+    ctx.set("dict".into(), Value::Builtin(builtin_dict));
     ctx.set("fmt".into(), Value::Builtin(builtin_fmt));
     ctx.set("len".into(), Value::Builtin(builtin_len));
     ctx.set("print".into(), Value::Builtin(builtin_print));

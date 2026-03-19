@@ -104,7 +104,7 @@ pub unsafe fn call_ffi_function(func_ptr: unsafe extern "C" fn(), ctypes: &[CTyp
                     Value::Str(CStr::from_ptr(ptr).to_string_lossy().into_owned())
                 }
             },
-            _ => panic!("unsupported")
+            _ => panic!("unsupported return type")
         }
     }
 }
